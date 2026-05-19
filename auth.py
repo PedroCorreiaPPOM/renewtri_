@@ -1,300 +1,182 @@
+import re
+
 import streamlit as st
-import database
-import utils
+
+import database as db
+from utils import format_cnpj, validate_cnpj, validate_password
 
 
-def init_session():
+def init_session_state() -> None:
+    defaults = {
+        "authenticated": False,
+        "role": None,
+        "user_email": None,
+        "school_id": None,
+        "school_name": None,
+        "school_code": None,
+        "employee_id": None,
+        "employee_name": None,
+    }
+    for key, value in defaults.items():
+        st.session_state.setdefault(key, value)
 
-    if "logado" not in st.session_state:
-        st.session_state.logado = False
 
-    if "usuario" not in st.session_state:
-        st.session_state.usuario = None
+def login_user(role: str, email: str, password: str, school_code: str | None = None) -> bool:
+    email = email.strip().lower()
+    if role == "Instituição de ensino":
+        school = db.school_by_email(email)
+        if not school or not validate_password(password, school["senha_hash"]):
+            db.register_access("instituicao", email, False, "Login inválido")
+            st.error("Email ou senha da instituição estão incorretos.")
+            return False
+        set_authenticated_school(school)
+        db.register_access("instituicao", email, True, "Login realizado", school["id"])
+        return True
 
-    if "tipo_usuario" not in st.session_state:
-        st.session_state.tipo_usuario = None
+    employee = db.employee_by_email(email)
+    if not employee or not validate_password(password, employee["senha_hash"]):
+        db.register_access("merendeira", email, False, "Login inválido")
+        st.error("Email ou senha da merendeira estão incorretos.")
+        return False
+    if not employee["ativo"]:
+        db.register_access("merendeira", email, False, "Acesso desativado", employee["escola_id"])
+        st.error("Este acesso está desativado. Procure a instituição.")
+        return False
+    if employee["codigo_escola"].upper() != (school_code or "").strip().upper():
+        db.register_access("merendeira", email, False, "Código da escola inválido", employee["escola_id"])
+        st.error("Código da escola incorreto para esta merendeira.")
+        return False
+
+    st.session_state.authenticated = True
+    st.session_state.role = "merendeira"
+    st.session_state.user_email = employee["email"]
+    st.session_state.school_id = employee["escola_id"]
+    st.session_state.school_name = employee["escola_nome"]
+    st.session_state.school_code = employee["codigo_escola"]
+    st.session_state.employee_id = employee["id"]
+    st.session_state.employee_name = employee["nome"]
+    db.register_access("merendeira", email, True, "Login realizado", employee["escola_id"])
+    return True
 
 
-def logout():
+def set_authenticated_school(school) -> None:
+    st.session_state.authenticated = True
+    st.session_state.role = "instituicao"
+    st.session_state.user_email = school["email"]
+    st.session_state.school_id = school["id"]
+    st.session_state.school_name = school["nome"]
+    st.session_state.school_code = school["codigo_escola"]
+    st.session_state.employee_id = None
+    st.session_state.employee_name = None
 
-    st.session_state.logado = False
-    st.session_state.usuario = None
-    st.session_state.tipo_usuario = None
 
+def logout() -> None:
+    for key in [
+        "authenticated",
+        "role",
+        "user_email",
+        "school_id",
+        "school_name",
+        "school_code",
+        "employee_id",
+        "employee_name",
+    ]:
+        st.session_state.pop(key, None)
+    init_session_state()
     st.rerun()
 
 
-def cadastrar_escola():
-
-    st.subheader("Cadastro da Instituição")
-
-    nome = st.text_input(
-        "Nome da instituição",
-        key="cadastro_nome"
-    )
-
-    email = st.text_input(
-        "Email",
-        key="cadastro_email"
-    )
-
-    cnpj = st.text_input(
-        "CNPJ",
-        key="cadastro_cnpj"
-    )
-
-    inep = st.text_input(
-        "Código INEP",
-        key="cadastro_inep"
-    )
-
-    senha = st.text_input(
-        "Senha",
-        type="password",
-        key="cadastro_senha"
-    )
-
-    if st.button("Cadastrar instituição"):
-
-        if not nome or not email or not cnpj or not inep or not senha:
-            st.warning("Preencha todos os campos.")
-            return
-
-        if not utils.validar_cnpj(cnpj):
-            st.error("CNPJ inválido.")
-            return
-
-        codigo_escola = utils.gerar_codigo_escola()
-
-        try:
-
-            database.executar_query(
-                """
-                INSERT INTO escolas
-                (nome, email, cnpj, inep, senha, codigo_escola)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    nome,
-                    email,
-                    cnpj,
-                    inep,
-                    senha,
-                    codigo_escola
-                )
-            )
-
-            st.success("Instituição cadastrada com sucesso!")
-
-            st.info(
-                f"Código da escola: {codigo_escola}"
-            )
-
-        except Exception as erro:
-
-            st.error(
-                f"Erro ao cadastrar: {erro}"
-            )
+def valid_email(email: str) -> bool:
+    return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email or ""))
 
 
-def login_escola():
-
-    st.subheader("Login da Instituição")
-
-    email = st.text_input(
-        "Email",
-        key="login_instituicao_email"
-    )
-
-    cnpj = st.text_input(
-        "CNPJ",
-        key="login_instituicao_cnpj"
-    )
-
-    senha = st.text_input(
-        "Senha",
-        type="password",
-        key="login_instituicao_senha"
-    )
-
-    if st.button("Entrar como instituição"):
-
-        usuario = database.buscar_dados(
-            """
-            SELECT * FROM escolas
-            WHERE email = ?
-            AND cnpj = ?
-            AND senha = ?
-            """,
-            (
-                email,
-                cnpj,
-                senha
-            )
-        )
-
-        if usuario:
-
-            st.session_state.logado = True
-            st.session_state.usuario = usuario[0]
-            st.session_state.tipo_usuario = "instituicao"
-
-            st.success(
-                "Login realizado com sucesso!"
-            )
-
-            st.rerun()
-
-        else:
-
-            st.error(
-                "Email, CNPJ ou senha incorretos."
-            )
-
-
-def login_merendeira():
-
-    st.subheader("Login da Merendeira")
-
-    email = st.text_input(
-        "Email da merendeira",
-        key="login_merendeira_email"
-    )
-
-    codigo_escola = st.text_input(
-        "Código da escola",
-        key="login_merendeira_codigo"
-    )
-
-    senha = st.text_input(
-        "Senha",
-        type="password",
-        key="login_merendeira_senha"
-    )
-
-    if st.button("Entrar como merendeira"):
-
-        usuario = database.buscar_dados(
-            """
-            SELECT m.*
-            FROM merendeiras m
-            JOIN escolas e
-            ON m.escola_id = e.id
-
-            WHERE m.email = ?
-            AND m.senha = ?
-            AND e.codigo_escola = ?
-            AND m.ativo = 1
-            """,
-            (
-                email,
-                senha,
-                codigo_escola
-            )
-        )
-
-        if usuario:
-
-            st.session_state.logado = True
-            st.session_state.usuario = usuario[0]
-            st.session_state.tipo_usuario = "merendeira"
-
-            st.success(
-                "Login realizado com sucesso!"
-            )
-
-            st.rerun()
-
-        else:
-
-            st.error("Dados inválidos.")
-
-
-def tela_autenticacao():
-
+def show_auth_page() -> None:
     st.markdown(
         """
-        <div style="
-            background: linear-gradient(135deg, #ecfdf5, #ffffff);
-            border: 1px solid #bbf7d0;
-            border-radius: 18px;
-            padding: 28px;
-            margin-bottom: 28px;
-            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
-        ">
-
-            <h2 style="
-                margin-top:0;
-                color:#064e3b;
-                margin-bottom: 20px;
-            ">
-                Dados de demonstração
-            </h2>
-
-            <div style="
-                display:flex;
-                gap:40px;
-                flex-wrap:wrap;
-            ">
-
-                <div style="
-                    background:#ffffff;
-                    padding:18px;
-                    border-radius:12px;
-                    min-width:280px;
-                    border:1px solid #d1fae5;
-                ">
-
-                    <h3 style="color:#0f172a;">
-                        Instituição
-                    </h3>
-
-                    <p><b>Email:</b> escola@renewtri.demo</p>
-
-                    <p><b>CNPJ:</b> 12345678000190</p>
-
-                    <p><b>Senha:</b> renewtri123</p>
-
-                </div>
-
-                <div style="
-                    background:#ffffff;
-                    padding:18px;
-                    border-radius:12px;
-                    min-width:280px;
-                    border:1px solid #d1fae5;
-                ">
-
-                    <h3 style="color:#0f172a;">
-                        Merendeira
-                    </h3>
-
-                    <p><b>Email:</b> robertina@renewtri.demo</p>
-
-                    <p><b>Código:</b> ESC-DEMO1</p>
-
-                    <p><b>Senha:</b> merenda123</p>
-
-                </div>
-
+        <div class="renewtri-hero">
+            <div class="eyebrow">MVP Hackathon TI</div>
+            <h1>Renewtri</h1>
+            <div class="subtitle">
+                Plataforma para gestão da merenda escolar, redução de desperdício e sustentabilidade em escolas públicas.
             </div>
-
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
-    aba1, aba2, aba3 = st.tabs([
-        "Login Instituição",
-        "Login Merendeira",
-        "Cadastro Instituição"
-    ])
+    login_tab, register_tab = st.tabs(["Entrar", "Cadastrar instituição"])
 
-    with aba1:
-        login_escola()
+    with login_tab:
+        col_left, col_right = st.columns([1.15, 0.85])
+        with col_left:
+            st.subheader("Acesso à plataforma")
+            role = st.radio(
+                "Tipo de acesso",
+                ["Instituição de ensino", "Merendeira"],
+                horizontal=True,
+            )
+            with st.form("login_form"):
+                email = st.text_input("Email")
+                school_code = None
+                if role == "Merendeira":
+                    school_code = st.text_input("Código da escola")
+                password = st.text_input("Senha", type="password")
+                submitted = st.form_submit_button("Entrar")
 
-    with aba2:
-        login_merendeira()
+            if submitted:
+                if not valid_email(email):
+                    st.error("Informe um email válido.")
+                elif not password:
+                    st.error("Informe a senha.")
+                elif login_user(role, email, password, school_code):
+                    st.success("Login realizado com sucesso.")
+                    st.rerun()
 
-    with aba3:
-        cadastrar_escola()
+        with col_right:
+            st.markdown(
+                """
+                <div class="info-card">
+                    <div class="badge">Dados de demonstração</div>
+                    <h3>Instituição</h3>
+                    <p><strong>Email:</strong> escola@renewtri.demo<br>
+                    <strong>Senha:</strong> renewtri123</p>
+                    <h3>Merendeira</h3>
+                    <p><strong>Email:</strong> robertina@renewtri.demo<br>
+                    <strong>Senha:</strong> merenda123<br>
+                    <strong>Código:</strong> aparece ao entrar como instituição.</p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    with register_tab:
+        st.subheader("Cadastro da instituição de ensino")
+        with st.form("register_school_form"):
+            nome = st.text_input("Nome da instituição")
+            email = st.text_input("Email institucional")
+            cnpj = st.text_input("CNPJ", placeholder="00.000.000/0000-00")
+            codigo_inep = st.text_input("Código INEP")
+            senha = st.text_input("Senha", type="password")
+            confirmar = st.text_input("Confirmar senha", type="password")
+            submitted = st.form_submit_button("Criar cadastro")
+
+        if submitted:
+            if not all([nome, email, cnpj, codigo_inep, senha, confirmar]):
+                st.error("Preencha todos os campos.")
+            elif not valid_email(email):
+                st.error("Informe um email válido.")
+            elif not validate_cnpj(cnpj):
+                st.error("CNPJ inválido. Verifique os números informados.")
+            elif db.cnpj_exists(cnpj):
+                st.error("Este CNPJ já está cadastrado.")
+            elif db.school_by_email(email):
+                st.error("Este email já está cadastrado.")
+            elif senha != confirmar:
+                st.error("As senhas não conferem.")
+            elif len(senha) < 6:
+                st.error("A senha deve ter pelo menos 6 caracteres.")
+            else:
+                code = db.create_school(nome, email, cnpj, codigo_inep, senha)
+                st.success(
+                    f"Instituição cadastrada com sucesso. CNPJ: {format_cnpj(cnpj)}. Código da escola: {code}"
+                )
