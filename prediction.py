@@ -4,79 +4,244 @@ import pandas as pd
 import streamlit as st
 
 import database as db
-from utils import format_kg, format_percent, metric_card, page_header
+from utils import format_int, format_kg, format_percent, metric_card, page_header
+
+
+PORTION_KG = 0.45
+
+WEEKDAYS = {
+    0: "Segunda-feira",
+    1: "Terça-feira",
+    2: "Quarta-feira",
+    3: "Quinta-feira",
+    4: "Sexta-feira",
+    5: "Sábado",
+    6: "Domingo",
+}
+
+
+def prepare_history(production: pd.DataFrame) -> pd.DataFrame:
+    df = production.copy()
+
+    df["data"] = pd.to_datetime(df["data"])
+    df["refeicoes_produzidas"] = pd.to_numeric(df["refeicoes_produzidas"], errors="coerce").fillna(0)
+    df["desperdicio_kg"] = pd.to_numeric(df["desperdicio_kg"], errors="coerce").fillna(0)
+
+    df["dia_semana"] = df["data"].dt.weekday
+    df["taxa_desperdicio"] = (
+        df["desperdicio_kg"] / df["refeicoes_produzidas"].replace(0, pd.NA) * 100
+    ).fillna(0)
+
+    return df.sort_values("data")
+
+
+def calculate_general_metrics(df: pd.DataFrame) -> dict[str, float]:
+    last_30_days = df[df["data"] >= df["data"].max() - pd.Timedelta(days=30)]
+
+    if last_30_days.empty:
+        last_30_days = df
+
+    total_meals = last_30_days["refeicoes_produzidas"].sum()
+    total_waste = last_30_days["desperdicio_kg"].sum()
+
+    avg_meals = last_30_days["refeicoes_produzidas"].mean()
+    waste_rate = (total_waste / total_meals * 100) if total_meals else 0
+    success_rate = max(0, 100 - waste_rate)
+
+    return {
+        "avg_meals": avg_meals,
+        "waste_rate": waste_rate,
+        "success_rate": success_rate,
+    }
+
+
+def build_forecast_table(df: pd.DataFrame, days: int = 7) -> pd.DataFrame:
+    max_date = df["data"].max()
+    recent_history = df[df["data"] >= max_date - pd.Timedelta(days=30)]
+
+    if recent_history.empty:
+        recent_history = df
+
+    recent_avg_meals = recent_history["refeicoes_produzidas"].mean()
+    recent_waste_rate = recent_history["taxa_desperdicio"].mean()
+
+    forecast_rows = []
+
+    for day_offset in range(1, days + 1):
+        target_date = date.today() + timedelta(days=day_offset)
+        weekday_number = target_date.weekday()
+
+        same_weekday_history = df[df["dia_semana"] == weekday_number].tail(8)
+
+        if same_weekday_history.empty:
+            base_meals = recent_avg_meals
+            base_waste_rate = recent_waste_rate
+        else:
+            weekday_avg_meals = same_weekday_history["refeicoes_produzidas"].mean()
+            weekday_waste_rate = same_weekday_history["taxa_desperdicio"].mean()
+
+            base_meals = (weekday_avg_meals * 0.70) + (recent_avg_meals * 0.30)
+            base_waste_rate = (weekday_waste_rate * 0.70) + (recent_waste_rate * 0.30)
+
+        if base_waste_rate > 10:
+            reduction_factor = 0.08
+        elif base_waste_rate > 6:
+            reduction_factor = 0.05
+        else:
+            reduction_factor = 0.03
+
+        recommended_plates = int(round(base_meals * (1 - reduction_factor)))
+        recommended_plates = max(recommended_plates, 1)
+
+        recommended_kg = recommended_plates * PORTION_KG
+
+        predicted_waste_rate = max(base_waste_rate - (reduction_factor * 35), 2)
+        predicted_success_rate = min(100, 100 - predicted_waste_rate)
+
+        forecast_rows.append(
+            {
+                "Dia da semana": WEEKDAYS[weekday_number],
+                "Data": target_date.strftime("%d/%m/%Y"),
+                "Pratos": recommended_plates,
+                "Kg": recommended_kg,
+                "Sucesso": predicted_success_rate,
+                "Desperdício": predicted_waste_rate,
+            }
+        )
+
+    return pd.DataFrame(forecast_rows)
 
 
 def show_prediction(school_id: int) -> None:
     page_header(
         "Previsão Inteligente",
-        "Simulação baseada em médias, histórico de consumo e tendência simples de desperdício.",
-        "Análise preditiva simples",
+        "Recomendações de preparo com base no histórico da escola, taxa de desperdício e média de consumo.",
+        "Planejamento alimentar",
     )
 
     production = db.production_df(school_id)
-    if production.empty or len(production) < 3:
-        st.info("Cadastre pelo menos três produções para gerar recomendações inteligentes.")
+
+    if production.empty:
+        st.info("Ainda não há dados suficientes para gerar previsões. Registre produções alimentares primeiro.")
         return
 
-    df = production.copy()
-    df["data"] = pd.to_datetime(df["data"])
-    df = df.sort_values("data")
+    df = prepare_history(production)
 
-    last_14 = df[df["data"] >= df["data"].max() - pd.Timedelta(days=14)]
-    last_30 = df[df["data"] >= df["data"].max() - pd.Timedelta(days=30)]
-    average_meals = last_14["refeicoes_produzidas"].mean()
-    average_waste = last_14["desperdicio_kg"].mean()
-    waste_rate = last_30["desperdicio_kg"].sum() / last_30["refeicoes_produzidas"].sum() * 100
+    if len(df) < 3:
+        st.warning("Cadastre pelo menos três registros de produção para melhorar a qualidade da previsão.")
 
-    weekday = (date.today() + timedelta(days=1)).weekday()
-    weekday_history = df[df["data"].dt.weekday == weekday]
-    if not weekday_history.empty:
-        recommended = int(round((average_meals * 0.55) + (weekday_history["refeicoes_produzidas"].tail(6).mean() * 0.45)))
-    else:
-        recommended = int(round(average_meals))
-
-    current_month = pd.Timestamp.today().to_period("M")
-    previous_month = current_month - 1
-    current_waste = df[df["data"].dt.to_period("M") == current_month]["desperdicio_kg"].sum()
-    previous_waste = df[df["data"].dt.to_period("M") == previous_month]["desperdicio_kg"].sum()
-    saved = max(float(previous_waste - current_waste), 0.0)
+    metrics = calculate_general_metrics(df)
 
     col1, col2, col3 = st.columns(3)
+
     with col1:
-        metric_card("Recomendação", f"{recommended} refeições", "Preparo sugerido para amanhã")
+        metric_card(
+            "Média de refeições",
+            format_int(metrics["avg_meals"]),
+            "Base dos últimos registros",
+        )
+
     with col2:
-        metric_card("Taxa atual", format_percent(waste_rate), "Últimos 30 dias")
+        metric_card(
+            "Taxa de desperdício",
+            format_percent(metrics["waste_rate"]),
+            "Média recente",
+        )
+
     with col3:
-        metric_card("Economia mensal", format_kg(saved), "Comparação com mês anterior")
+        metric_card(
+            "Taxa de sucesso",
+            format_percent(metrics["success_rate"]),
+            "Aproveitamento estimado",
+        )
 
-    st.success(f"Recomendação: preparar {recommended} refeições amanhã.")
-    st.info(f"Taxa de desperdício atual: {format_percent(waste_rate)}.")
-    st.success(f"{format_kg(saved)} foram economizados este mês.")
+    st.markdown("---")
 
-    st.subheader("Como a previsão foi calculada")
+    if metrics["waste_rate"] > 10:
+        st.warning(
+            "Alerta: a taxa de desperdício está acima de 10%. "
+            "O sistema recomenda reduzir levemente a produção inicial e acompanhar a aceitação do cardápio."
+        )
+    else:
+        st.success(
+            "Desperdício controlado. O histórico indica bom aproveitamento da merenda escolar."
+        )
+
+    forecast_df = build_forecast_table(df)
+
+    tomorrow = forecast_df.iloc[0]
+
+    st.info(
+        f"Recomendação para amanhã: preparar **{tomorrow['Pratos']} pratos**, "
+        f"aproximadamente **{tomorrow['Kg']:.1f} kg**, com sucesso previsto de "
+        f"**{tomorrow['Sucesso']:.1f}%**."
+    )
+
+    st.subheader("Tabela inteligente de previsão")
+
+    table_df = forecast_df.copy()
+    table_df["Kg"] = table_df["Kg"].map(lambda value: f"{value:.1f} kg")
+    table_df["Sucesso"] = table_df["Sucesso"].map(lambda value: f"{value:.1f}%")
+    table_df["Desperdício"] = table_df["Desperdício"].map(lambda value: f"{value:.1f}%")
+
+    st.dataframe(
+        table_df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Dia da semana": st.column_config.TextColumn("Dia da semana"),
+            "Data": st.column_config.TextColumn("Data"),
+            "Pratos": st.column_config.NumberColumn("Quantidade recomendada de pratos"),
+            "Kg": st.column_config.TextColumn("Quantidade recomendada em kg"),
+            "Sucesso": st.column_config.TextColumn("Taxa prevista de sucesso"),
+            "Desperdício": st.column_config.TextColumn("Taxa prevista de desperdício"),
+        },
+    )
+
+    st.markdown("---")
+
+    st.subheader("Recomendações automáticas")
+
+    best_day = forecast_df.sort_values("Desperdício").iloc[0]
+    attention_day = forecast_df.sort_values("Desperdício", ascending=False).iloc[0]
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.success(
+            f"Melhor cenário previsto: **{best_day['Dia da semana']}**, "
+            f"com desperdício estimado de **{best_day['Desperdício']:.1f}%**."
+        )
+
+    with col2:
+        st.warning(
+            f"Dia que exige mais atenção: **{attention_day['Dia da semana']}**, "
+            f"com desperdício estimado de **{attention_day['Desperdício']:.1f}%**."
+        )
+
+    st.markdown("---")
+
+    st.subheader("Como o sistema calcula a previsão")
+
     st.markdown(
-        f"""
+        """
         <div class="info-card">
-            <p><strong>Média dos últimos 14 dias:</strong> {average_meals:.0f} refeições por registro.</p>
-            <p><strong>Média de desperdício recente:</strong> {average_waste:.1f} kg por registro.</p>
-            <p><strong>Comparação histórica:</strong> a recomendação combina média recente com registros do mesmo dia da semana.</p>
-            <p><strong>Leitura operacional:</strong> se a taxa passar de 10%, a equipe deve reduzir preparo inicial e acompanhar aceitação do cardápio.</p>
+            <p>
+                A previsão do Renewtri utiliza os registros salvos no banco de dados da escola.
+                O sistema analisa a média recente de refeições produzidas, a média de desperdício
+                e o comportamento histórico do mesmo dia da semana.
+            </p>
+            <p>
+                Para evitar desperdício, a recomendação aplica uma redução leve na quantidade
+                prevista quando a taxa de desperdício está alta. Assim, a escola consegue preparar
+                uma quantidade mais próxima da demanda real dos estudantes.
+            </p>
+            <p>
+                A quantidade em kg é uma estimativa baseada em uma porção média de
+                <strong>0,45 kg por prato</strong>. Esse valor pode ser ajustado futuramente conforme
+                a realidade da escola e o tipo de cardápio.
+            </p>
         </div>
         """,
         unsafe_allow_html=True,
-    )
-
-    if waste_rate > 10:
-        st.warning("A taxa está acima da meta sugerida de 10%. Revise cardápios com baixa aceitação e dias de menor frequência.")
-    elif waste_rate > 6:
-        st.info("A taxa está controlada, mas ainda há espaço para reduzir sobras com ajustes finos por turno.")
-    else:
-        st.success("A taxa está em nível muito bom para demonstração do MVP.")
-
-    st.subheader("Histórico usado na análise")
-    st.dataframe(
-        df.tail(12).sort_values("data", ascending=False),
-        use_container_width=True,
-        hide_index=True,
     )
