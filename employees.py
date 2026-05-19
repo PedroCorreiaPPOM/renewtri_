@@ -1,126 +1,76 @@
 import streamlit as st
-import database
+
+import database as db
+from auth import valid_email
+from utils import metric_card, page_header
 
 
-def show_employees():
-
-    st.header("👩‍🍳 Gerenciamento de Merendeiras")
-
-    st.subheader("Cadastrar Merendeira")
-
-    nome = st.text_input("Nome")
-
-    email = st.text_input("Email")
-
-    senha = st.text_input(
-        "Senha",
-        type="password"
+def show_employees(school_id: int) -> None:
+    school = db.get_school(school_id)
+    page_header(
+        "Gerenciamento de merendeiras",
+        "Cadastre, visualize e controle o acesso das profissionais responsáveis pelos registros da merenda.",
+        "Administração",
     )
 
-    if st.button("Cadastrar Merendeira"):
+    c1, c2 = st.columns([0.72, 0.28])
+    with c1:
+        st.subheader("Cadastrar merendeira")
+        with st.form("employee_form", clear_on_submit=True):
+            nome = st.text_input("Nome completo")
+            email = st.text_input("Email")
+            senha = st.text_input("Senha inicial", type="password")
+            submitted = st.form_submit_button("Cadastrar merendeira")
 
-        try:
+        if submitted:
+            if not nome.strip() or not email.strip() or not senha:
+                st.error("Preencha todos os campos.")
+            elif not valid_email(email):
+                st.error("Informe um email válido.")
+            elif db.employee_by_email(email):
+                st.error("Este email já está cadastrado para uma merendeira.")
+            elif len(senha) < 6:
+                st.error("A senha deve ter pelo menos 6 caracteres.")
+            else:
+                db.create_employee(school_id, nome.strip(), email.strip().lower(), senha)
+                st.success("Merendeira cadastrada com sucesso.")
+                st.rerun()
 
-            database.executar_query(
-                """
-                INSERT INTO merendeiras
-                (
-                    escola_id,
-                    nome,
-                    email,
-                    senha,
-                    ativo
-                )
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    1,
-                    nome,
-                    email,
-                    senha,
-                    1
-                )
-            )
+    with c2:
+        metric_card("Código da escola", school["codigo_escola"], "Use no login da merendeira")
 
-            st.success("Merendeira cadastrada com sucesso!")
+    employees = db.employees_df(school_id)
+    st.subheader("Merendeiras cadastradas")
+    if employees.empty:
+        st.info("Nenhuma merendeira cadastrada ainda.")
+        return
 
-        except Exception as erro:
+    for _, row in employees.iterrows():
+        col_name, col_status, col_action = st.columns([0.58, 0.18, 0.24])
+        with col_name:
+            st.markdown(f"**{row['nome']}**")
+            st.caption(row["email"])
+        with col_status:
+            status = "Ativa" if row["ativo"] else "Desativada"
+            st.markdown(f"<span class='badge'>{status}</span>", unsafe_allow_html=True)
+        with col_action:
+            if row["ativo"]:
+                if st.button("Desativar", key=f"disable_{row['id']}"):
+                    db.set_employee_status(int(row["id"]), False, school_id)
+                    st.rerun()
+            else:
+                if st.button("Ativar", key=f"enable_{row['id']}"):
+                    db.set_employee_status(int(row["id"]), True, school_id)
+                    st.rerun()
 
-            st.error(f"Erro ao cadastrar: {erro}")
-
-    st.markdown("---")
-
-    st.subheader("📋 Merendeiras Cadastradas")
-
-    dados = database.buscar_dados("""
-        SELECT
-            id,
-            nome,
-            email,
-            ativo
-        FROM merendeiras
-        ORDER BY nome
-    """)
-
-    if dados:
-
-        for item in dados:
-
-            id_usuario = item[0]
-            nome = item[1]
-            email = item[2]
-            ativo = item[3]
-
-            col1, col2 = st.columns([4, 1])
-
-            with col1:
-
-                status = "🟢 Ativa" if ativo else "🔴 Inativa"
-
-                st.write(f"👤 {nome}")
-                st.write(f"📧 {email}")
-                st.write(status)
-
-            with col2:
-
-                if ativo:
-
-                    if st.button(
-                        "Desativar",
-                        key=f"desativar_{id_usuario}"
-                    ):
-
-                        database.executar_query(
-                            """
-                            UPDATE merendeiras
-                            SET ativo = 0
-                            WHERE id = ?
-                            """,
-                            (id_usuario,)
-                        )
-
-                        st.rerun()
-
-                else:
-
-                    if st.button(
-                        "Ativar",
-                        key=f"ativar_{id_usuario}"
-                    ):
-
-                        database.executar_query(
-                            """
-                            UPDATE merendeiras
-                            SET ativo = 1
-                            WHERE id = ?
-                            """,
-                            (id_usuario,)
-                        )
-
-                        st.rerun()
-
-            st.markdown("---")
-
-    else:
-
-        st.info("Nenhuma merendeira cadastrada.")
+    st.dataframe(
+        employees,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "nome": "Nome",
+            "email": "Email",
+            "ativo": "Ativo",
+            "created_at": "Criada em",
+        },
+    )
