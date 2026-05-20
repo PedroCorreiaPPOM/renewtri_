@@ -17,6 +17,7 @@ def init_session_state() -> None:
         "employee_id": None,
         "employee_name": None,
     }
+
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
 
@@ -29,27 +30,45 @@ def login_user(
     cnpj: str | None = None,
 ) -> bool:
     email = email.strip().lower()
+
     if role == "Instituição de ensino":
         school = db.school_by_email_and_cnpj(email, cnpj or "")
+
         if not school or not validate_password(password, school["senha_hash"]):
             db.register_access("instituicao", email, False, "Login inválido")
             st.error("Email, CNPJ ou senha da instituição estão incorretos.")
             return False
+
         set_authenticated_school(school)
         db.register_access("instituicao", email, True, "Login realizado", school["id"])
         return True
 
     employee = db.employee_by_email(email)
+
     if not employee or not validate_password(password, employee["senha_hash"]):
         db.register_access("merendeira", email, False, "Login inválido")
         st.error("Email ou senha da merendeira estão incorretos.")
         return False
+
     if not employee["ativo"]:
-        db.register_access("merendeira", email, False, "Acesso desativado", employee["escola_id"])
+        db.register_access(
+            "merendeira",
+            email,
+            False,
+            "Acesso desativado",
+            employee["escola_id"],
+        )
         st.error("Este acesso está desativado. Procure a instituição.")
         return False
+
     if employee["codigo_escola"].upper() != (school_code or "").strip().upper():
-        db.register_access("merendeira", email, False, "Código da escola inválido", employee["escola_id"])
+        db.register_access(
+            "merendeira",
+            email,
+            False,
+            "Código da escola inválido",
+            employee["escola_id"],
+        )
         st.error("Código da escola incorreto para esta merendeira.")
         return False
 
@@ -61,6 +80,7 @@ def login_user(
     st.session_state.school_code = employee["codigo_escola"]
     st.session_state.employee_id = employee["id"]
     st.session_state.employee_name = employee["nome"]
+
     db.register_access("merendeira", email, True, "Login realizado", employee["escola_id"])
     return True
 
@@ -88,6 +108,7 @@ def logout() -> None:
         "employee_name",
     ]:
         st.session_state.pop(key, None)
+
     init_session_state()
     st.rerun()
 
@@ -103,7 +124,8 @@ def show_auth_page() -> None:
             <div class="eyebrow">MVP Hackathon TI</div>
             <h1>Renewtri</h1>
             <div class="subtitle">
-                Plataforma para gestão da merenda escolar, redução de desperdício e sustentabilidade em escolas públicas.
+                Plataforma para gestão da merenda escolar, redução de desperdício
+                e sustentabilidade em escolas públicas.
             </div>
         </div>
         """,
@@ -114,21 +136,28 @@ def show_auth_page() -> None:
 
     with login_tab:
         col_left, col_right = st.columns([1.15, 0.85])
+
         with col_left:
             st.subheader("Acesso à plataforma")
+
             role = st.radio(
                 "Tipo de acesso",
                 ["Instituição de ensino", "Merendeira"],
                 horizontal=True,
             )
+
             with st.form("login_form"):
                 email = st.text_input("Email")
+
                 school_code = None
                 cnpj = None
+
                 if role == "Instituição de ensino":
                     cnpj = st.text_input("CNPJ", placeholder="00.000.000/0000-00")
+
                 if role == "Merendeira":
                     school_code = st.text_input("Código da escola")
+
                 password = st.text_input("Senha", type="password")
                 submitted = st.form_submit_button("Entrar")
 
@@ -148,14 +177,20 @@ def show_auth_page() -> None:
                 """
                 <div class="info-card">
                     <div class="badge">Dados de demonstração</div>
+
                     <h3>Instituição</h3>
-                    <p><strong>Email:</strong> escola@renewtri.demo<br>
-                    <strong>CNPJ:</strong> 11.222.333/0001-81<br>
-                    <strong>Senha:</strong> renewtri123</p>
+                    <p>
+                        <strong>Email:</strong> escola@renewtri.demo<br>
+                        <strong>CNPJ:</strong> 11.222.333/0001-81<br>
+                        <strong>Senha:</strong> renewtri123
+                    </p>
+
                     <h3>Merendeira</h3>
-                    <p><strong>Email:</strong> robertina@renewtri.demo<br>
-                    <strong>Senha:</strong> merenda123<br>
-                    <strong>Código:</strong> aparece ao entrar como instituição.</p>
+                    <p>
+                        <strong>Email:</strong> robertina@renewtri.demo<br>
+                        <strong>Senha:</strong> merenda123<br>
+                        <strong>Código:</strong> aparece ao entrar como instituição.
+                    </p>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -163,6 +198,7 @@ def show_auth_page() -> None:
 
     with register_tab:
         st.subheader("Cadastro da instituição de ensino")
+
         with st.form("register_school_form"):
             nome = st.text_input("Nome da instituição")
             email = st.text_input("Email institucional")
@@ -190,5 +226,7 @@ def show_auth_page() -> None:
             else:
                 code = db.create_school(nome, email, cnpj, codigo_inep, senha)
                 st.success(
-                    f"Instituição cadastrada com sucesso. CNPJ: {format_cnpj(cnpj)}. Código da escola: {code}"
+                    f"Instituição cadastrada com sucesso. "
+                    f"CNPJ: {format_cnpj(cnpj)}. "
+                    f"Código da escola: {code}"
                 )
