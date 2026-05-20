@@ -274,6 +274,13 @@ def school_by_email(email: str):
     return fetch_one("SELECT * FROM escolas WHERE lower(email) = lower(?)", (email,))
 
 
+def school_by_email_and_cnpj(email: str, cnpj: str):
+    return fetch_one(
+        "SELECT * FROM escolas WHERE lower(email) = lower(?) AND cnpj = ?",
+        (email, normalize_cnpj(cnpj)),
+    )
+
+
 def school_by_code(code: str):
     return fetch_one("SELECT * FROM escolas WHERE upper(codigo_escola) = upper(?)", (code.strip(),))
 

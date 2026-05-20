@@ -3,7 +3,7 @@ import re
 import streamlit as st
 
 import database as db
-from utils import format_cnpj, validate_cnpj, validate_password
+from utils import format_cnpj, normalize_cnpj, validate_cnpj, validate_password
 
 
 def init_session_state() -> None:
@@ -21,13 +21,19 @@ def init_session_state() -> None:
         st.session_state.setdefault(key, value)
 
 
-def login_user(role: str, email: str, password: str, school_code: str | None = None) -> bool:
+def login_user(
+    role: str,
+    email: str,
+    password: str,
+    school_code: str | None = None,
+    cnpj: str | None = None,
+) -> bool:
     email = email.strip().lower()
     if role == "Instituição de ensino":
-        school = db.school_by_email(email)
+        school = db.school_by_email_and_cnpj(email, cnpj or "")
         if not school or not validate_password(password, school["senha_hash"]):
             db.register_access("instituicao", email, False, "Login inválido")
-            st.error("Email ou senha da instituição estão incorretos.")
+            st.error("Email, CNPJ ou senha da instituição estão incorretos.")
             return False
         set_authenticated_school(school)
         db.register_access("instituicao", email, True, "Login realizado", school["id"])
@@ -118,6 +124,9 @@ def show_auth_page() -> None:
             with st.form("login_form"):
                 email = st.text_input("Email")
                 school_code = None
+                cnpj = None
+                if role == "Instituição de ensino":
+                    cnpj = st.text_input("CNPJ", placeholder="00.000.000/0000-00")
                 if role == "Merendeira":
                     school_code = st.text_input("Código da escola")
                 password = st.text_input("Senha", type="password")
@@ -126,9 +135,11 @@ def show_auth_page() -> None:
             if submitted:
                 if not valid_email(email):
                     st.error("Informe um email válido.")
+                elif role == "Instituição de ensino" and len(normalize_cnpj(cnpj or "")) != 14:
+                    st.error("Informe um CNPJ válido.")
                 elif not password:
                     st.error("Informe a senha.")
-                elif login_user(role, email, password, school_code):
+                elif login_user(role, email, password, school_code, cnpj):
                     st.success("Login realizado com sucesso.")
                     st.rerun()
 
@@ -139,6 +150,7 @@ def show_auth_page() -> None:
                     <div class="badge">Dados de demonstração</div>
                     <h3>Instituição</h3>
                     <p><strong>Email:</strong> escola@renewtri.demo<br>
+                    <strong>CNPJ:</strong> 11.222.333/0001-81<br>
                     <strong>Senha:</strong> renewtri123</p>
                     <h3>Merendeira</h3>
                     <p><strong>Email:</strong> robertina@renewtri.demo<br>
