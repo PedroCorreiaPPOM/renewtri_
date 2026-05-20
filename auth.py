@@ -173,28 +173,26 @@ def show_auth_page() -> None:
                     st.rerun()
 
         with col_right:
-            st.markdown(
-                """
-                <div class="info-card">
-                    <div class="badge">Dados de demonstração</div>
+            demo_html = """
+<div class="info-card">
+    <div class="badge">Dados de demonstração</div>
 
-                    <h3>Instituição</h3>
-                    <p>
-                        <strong>Email:</strong> escola@renewtri.demo<br>
-                        <strong>CNPJ:</strong> 11.222.333/0001-81<br>
-                        <strong>Senha:</strong> renewtri123
-                    </p>
+    <h3>Instituição</h3>
+    <p>
+        <strong>Email:</strong> escola@renewtri.demo<br>
+        <strong>CNPJ:</strong> 11.222.333/0001-81<br>
+        <strong>Senha:</strong> renewtri123
+    </p>
 
-                    <h3>Merendeira</h3>
-                    <p>
-                        <strong>Email:</strong> robertina@renewtri.demo<br>
-                        <strong>Senha:</strong> merenda123<br>
-                        <strong>Código:</strong> aparece ao entrar como instituição.
-                    </p>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+    <h3>Merendeira</h3>
+    <p>
+        <strong>Email:</strong> robertina@renewtri.demo<br>
+        <strong>Senha:</strong> merenda123<br>
+        <strong>Código:</strong> aparece ao entrar como instituição.
+    </p>
+</div>
+"""
+            st.markdown(demo_html, unsafe_allow_html=True)
 
     with register_tab:
         st.subheader("Cadastro da instituição de ensino")
