@@ -19,9 +19,20 @@ def show_food_production(school_id: int) -> None:
         st.subheader("Novo registro")
 
         with st.form("production_form", clear_on_submit=True):
-            data = st.date_input("Data", value=date.today())
+            data = st.date_input(
+                "Data",
+                value=date.today(),
+                format="DD/MM/YYYY",
+            )
+
             turno = st.selectbox("Turno", turnos())
-            refeicoes = st.number_input("Refeições produzidas", min_value=0, step=1, value=180)
+
+            refeicoes = st.number_input(
+                "Refeições produzidas",
+                min_value=0,
+                step=1,
+                value=180,
+            )
 
             alimentos = st.text_area(
                 "Alimentos utilizados",

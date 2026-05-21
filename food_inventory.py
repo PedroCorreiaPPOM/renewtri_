@@ -19,11 +19,34 @@ def show_food_inventory(school_id: int) -> None:
         st.subheader("Nova entrada")
 
         with st.form("inventory_form", clear_on_submit=True):
-            data = st.date_input("Data de recebimento", value=date.today())
-            fornecedor = st.text_input("Fornecedor", placeholder="Ex.: Cooperativa Sertão Verde")
-            alimento = st.text_input("Alimento", placeholder="Ex.: arroz")
-            quantidade = st.number_input("Quantidade em kg", min_value=0.0, value=20.0, step=0.5)
-            validade = st.date_input("Validade", value=date.today() + timedelta(days=30))
+            data = st.date_input(
+                "Data de recebimento",
+                value=date.today(),
+                format="DD/MM/YYYY",
+            )
+
+            fornecedor = st.text_input(
+                "Fornecedor",
+                placeholder="Ex.: Cooperativa Sertão Verde",
+            )
+
+            alimento = st.text_input(
+                "Alimento",
+                placeholder="Ex.: arroz",
+            )
+
+            quantidade = st.number_input(
+                "Quantidade em kg",
+                min_value=0.0,
+                value=20.0,
+                step=0.5,
+            )
+
+            validade = st.date_input(
+                "Validade",
+                value=date.today() + timedelta(days=30),
+                format="DD/MM/YYYY",
+            )
 
             observacoes = st.text_area(
                 "Observações",
