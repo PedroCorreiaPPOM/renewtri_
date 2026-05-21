@@ -16,7 +16,6 @@ Além disso, o sistema busca incentivar práticas sustentáveis e conscientizaç
 - Cadastro e gerenciamento de merendeiras
 - Registro da produção alimentar diária
 - Controle de alimentos recebidos
-- Relatórios inteligentes com gráficos e métricas
 - Sistema de previsão inteligente baseado em histórico
 - Indicadores de desperdício alimentar
 - Área de sustentabilidade e educação ambiental
@@ -32,7 +31,6 @@ As merendeiras podem registrar:
 - observações operacionais.
 
 Com base nos dados armazenados, o sistema gera:
-- relatórios;
 - gráficos;
 - métricas;
 - previsões inteligentes de preparo alimentar;
@@ -55,6 +53,4 @@ O Renewtri busca contribuir para:
 - conscientização ambiental nas escolas públicas;
 - uso inteligente de dados na gestão escolar.
 
-## MVP
-
-Projeto tem seu desenvolvimento voltado como MVP para hackathon e iniciativas de inovação tecnológica voltadas à educação e sustentabilidade.
+Projeto desenvolvido como MVP para hackathon e iniciativas de inovação tecnológica voltadas à educação e sustentabilidade.
