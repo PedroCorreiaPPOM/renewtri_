@@ -7,7 +7,6 @@ from employees import show_employees
 from food_inventory import show_food_inventory
 from food_production import show_food_production
 from prediction import show_prediction
-from reports import show_reports
 from sustainability import show_sustainability
 from utils import apply_custom_css
 
@@ -28,7 +27,6 @@ def sidebar_navigation() -> str:
         "Dashboard",
         "Produção alimentar",
         "Alimentos recebidos",
-        "Relatórios",
         "Previsão Inteligente",
         "Sustentabilidade",
     ]
@@ -71,8 +69,6 @@ def main() -> None:
             st.error("Apenas instituições podem acessar esta área.")
         else:
             show_employees(school_id)
-    elif selected == "Relatórios":
-        show_reports(school_id)
     elif selected == "Previsão Inteligente":
         show_prediction(school_id)
     elif selected == "Sustentabilidade":
