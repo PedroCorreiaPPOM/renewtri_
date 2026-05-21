@@ -8,6 +8,8 @@ from utils import format_int, format_percent, metric_card, page_header
 
 
 PORTION_KG = 0.45
+MAX_FORECAST_ROWS = 14
+LOOKAHEAD_DAYS = 21
 
 WEEKDAYS = {
     0: "Segunda-feira",
@@ -19,23 +21,35 @@ WEEKDAYS = {
     6: "Domingo",
 }
 
-
-DEFAULT_TURNS = ["Manhã", "Tarde"]
+TURN_ORDER = {
+    "Manhã": 1,
+    "Tarde": 2,
+    "Noite": 3,
+}
 
 
 def prepare_history(production: pd.DataFrame) -> pd.DataFrame:
     df = production.copy()
 
-    df["data"] = pd.to_datetime(df["data"])
+    df["data"] = pd.to_datetime(df["data"], errors="coerce")
+    df = df.dropna(subset=["data"])
+
     df["refeicoes_produzidas"] = pd.to_numeric(
         df["refeicoes_produzidas"], errors="coerce"
     ).fillna(0)
+
     df["desperdicio_kg"] = pd.to_numeric(
         df["desperdicio_kg"], errors="coerce"
     ).fillna(0)
 
-    df["turno"] = df["turno"].fillna("Não informado")
-    df["alimentos_utilizados"] = df["alimentos_utilizados"].fillna("Cardápio não informado")
+    df["turno"] = df["turno"].fillna("Não informado").astype(str)
+    df["alimentos_utilizados"] = (
+        df["alimentos_utilizados"]
+        .fillna("Cardápio não informado")
+        .astype(str)
+    )
+
+    df["data_date"] = df["data"].dt.date
     df["dia_semana"] = df["data"].dt.weekday
 
     df["taxa_desperdicio"] = (
@@ -65,34 +79,28 @@ def calculate_general_metrics(df: pd.DataFrame) -> dict[str, float]:
     }
 
 
-def get_forecast_turns(df: pd.DataFrame) -> list[str]:
-    turns = df["turno"].dropna().astype(str).unique().tolist()
-
-    if not turns:
-        return DEFAULT_TURNS
-
-    ordered_turns = [turn for turn in DEFAULT_TURNS if turn in turns]
-    other_turns = sorted([turn for turn in turns if turn not in ordered_turns])
-
-    return ordered_turns + other_turns
+def sort_turns(turns: list[str]) -> list[str]:
+    return sorted(turns, key=lambda turn: (TURN_ORDER.get(turn, 99), turn))
 
 
-def choose_food_suggestion(history: pd.DataFrame, fallback: pd.DataFrame) -> str:
-    valid_history = history[
-        history["alimentos_utilizados"].notna()
-        & (history["alimentos_utilizados"].str.strip() != "")
+def choose_food_suggestion(primary_history: pd.DataFrame, fallback_history: pd.DataFrame) -> str:
+    valid_primary = primary_history[
+        primary_history["alimentos_utilizados"].str.strip() != ""
     ]
 
-    if not valid_history.empty:
-        return valid_history.sort_values("data", ascending=False).iloc[0]["alimentos_utilizados"]
+    if not valid_primary.empty:
+        return valid_primary.sort_values("data", ascending=False).iloc[0][
+            "alimentos_utilizados"
+        ]
 
-    valid_fallback = fallback[
-        fallback["alimentos_utilizados"].notna()
-        & (fallback["alimentos_utilizados"].str.strip() != "")
+    valid_fallback = fallback_history[
+        fallback_history["alimentos_utilizados"].str.strip() != ""
     ]
 
     if not valid_fallback.empty:
-        return valid_fallback.sort_values("data", ascending=False).iloc[0]["alimentos_utilizados"]
+        return valid_fallback.sort_values("data", ascending=False).iloc[0][
+            "alimentos_utilizados"
+        ]
 
     return "Cardápio a definir"
 
@@ -114,68 +122,61 @@ def calculate_recommendation(base_meals: float, base_waste_rate: float) -> tuple
     return recommended_plates, predicted_success_rate, predicted_waste_rate
 
 
-def build_forecast_table(df: pd.DataFrame, days: int = 7) -> pd.DataFrame:
-    max_date = df["data"].max()
-    recent_history = df[df["data"] >= max_date - pd.Timedelta(days=30)]
+def build_forecast_table(df: pd.DataFrame) -> pd.DataFrame:
+    recent_history = df[df["data"] >= df["data"].max() - pd.Timedelta(days=30)]
 
     if recent_history.empty:
         recent_history = df
 
-    recent_avg_meals = recent_history["refeicoes_produzidas"].mean()
-    recent_waste_rate = recent_history["taxa_desperdicio"].mean()
-    turns = get_forecast_turns(df)
-
     forecast_rows = []
 
-    for day_offset in range(1, days + 1):
+    for day_offset in range(1, LOOKAHEAD_DAYS + 1):
+        if len(forecast_rows) >= MAX_FORECAST_ROWS:
+            break
+
         target_date = date.today() + timedelta(days=day_offset)
         weekday_number = target_date.weekday()
 
+        if weekday_number == 6:
+            continue
+
+        previous_week_date = target_date - timedelta(days=7)
+        previous_week_records = df[df["data_date"] == previous_week_date]
+
+        if previous_week_records.empty:
+            continue
+
+        turns = sort_turns(previous_week_records["turno"].dropna().unique().tolist())
+
         for turn in turns:
+            if len(forecast_rows) >= MAX_FORECAST_ROWS:
+                break
+
+            previous_week_turn = previous_week_records[
+                previous_week_records["turno"] == turn
+            ]
+
+            if previous_week_turn.empty:
+                continue
+
             same_weekday_turn_history = df[
                 (df["dia_semana"] == weekday_number) & (df["turno"] == turn)
-            ].tail(8)
+            ].tail(6)
 
-            same_turn_history = df[df["turno"] == turn].tail(12)
-            same_weekday_history = df[df["dia_semana"] == weekday_number].tail(8)
+            previous_meals = previous_week_turn["refeicoes_produzidas"].mean()
+            previous_waste_rate = previous_week_turn["taxa_desperdicio"].mean()
 
-            if not same_weekday_turn_history.empty:
-                turn_avg_meals = same_weekday_turn_history["refeicoes_produzidas"].mean()
-                turn_waste_rate = same_weekday_turn_history["taxa_desperdicio"].mean()
+            historical_meals = same_weekday_turn_history["refeicoes_produzidas"].mean()
+            historical_waste_rate = same_weekday_turn_history["taxa_desperdicio"].mean()
 
-                base_meals = (turn_avg_meals * 0.75) + (recent_avg_meals * 0.25)
-                base_waste_rate = (turn_waste_rate * 0.75) + (recent_waste_rate * 0.25)
-                food_suggestion = choose_food_suggestion(
-                    same_weekday_turn_history,
-                    recent_history,
-                )
+            if pd.isna(historical_meals):
+                historical_meals = previous_meals
 
-            elif not same_turn_history.empty:
-                turn_avg_meals = same_turn_history["refeicoes_produzidas"].mean()
-                turn_waste_rate = same_turn_history["taxa_desperdicio"].mean()
+            if pd.isna(historical_waste_rate):
+                historical_waste_rate = previous_waste_rate
 
-                base_meals = (turn_avg_meals * 0.65) + (recent_avg_meals * 0.35)
-                base_waste_rate = (turn_waste_rate * 0.65) + (recent_waste_rate * 0.35)
-                food_suggestion = choose_food_suggestion(
-                    same_turn_history,
-                    recent_history,
-                )
-
-            elif not same_weekday_history.empty:
-                weekday_avg_meals = same_weekday_history["refeicoes_produzidas"].mean()
-                weekday_waste_rate = same_weekday_history["taxa_desperdicio"].mean()
-
-                base_meals = (weekday_avg_meals * 0.65) + (recent_avg_meals * 0.35)
-                base_waste_rate = (weekday_waste_rate * 0.65) + (recent_waste_rate * 0.35)
-                food_suggestion = choose_food_suggestion(
-                    same_weekday_history,
-                    recent_history,
-                )
-
-            else:
-                base_meals = recent_avg_meals
-                base_waste_rate = recent_waste_rate
-                food_suggestion = choose_food_suggestion(recent_history, df)
+            base_meals = (previous_meals * 0.70) + (historical_meals * 0.30)
+            base_waste_rate = (previous_waste_rate * 0.70) + (historical_waste_rate * 0.30)
 
             recommended_plates, success_rate, waste_rate = calculate_recommendation(
                 base_meals,
@@ -183,6 +184,10 @@ def build_forecast_table(df: pd.DataFrame, days: int = 7) -> pd.DataFrame:
             )
 
             recommended_kg = recommended_plates * PORTION_KG
+            food_suggestion = choose_food_suggestion(
+                previous_week_turn,
+                same_weekday_turn_history,
+            )
 
             forecast_rows.append(
                 {
@@ -194,29 +199,90 @@ def build_forecast_table(df: pd.DataFrame, days: int = 7) -> pd.DataFrame:
                     "Kg": recommended_kg,
                     "Sucesso": success_rate,
                     "Desperdício": waste_rate,
+                    "Base usada": previous_week_date.strftime("%d/%m/%Y"),
                 }
             )
 
     return pd.DataFrame(forecast_rows)
 
 
+def show_prediction_message(forecast_df: pd.DataFrame) -> None:
+    tomorrow = date.today() + timedelta(days=1)
+    tomorrow_label = WEEKDAYS[tomorrow.weekday()]
+    tomorrow_formatted = tomorrow.strftime("%d/%m/%Y")
+
+    tomorrow_rows = forecast_df[forecast_df["Data"] == tomorrow_formatted]
+
+    if not tomorrow_rows.empty:
+        total_plates = tomorrow_rows["Pratos"].sum()
+        total_kg = tomorrow_rows["Kg"].sum()
+        avg_success = tomorrow_rows["Sucesso"].mean()
+
+        st.info(
+            f"Recomendação para **{tomorrow_label} ({tomorrow_formatted})**: "
+            f"preparar **{int(total_plates)} pratos**, aproximadamente "
+            f"**{total_kg:.1f} kg**, considerando os turnos cadastrados. "
+            f"Sucesso médio previsto: **{avg_success:.1f}%**."
+        )
+        return
+
+    if tomorrow.weekday() == 6:
+        st.warning(
+            f"Não há previsão para **{tomorrow_label} ({tomorrow_formatted})**, "
+            "pois domingo não é considerado dia letivo no planejamento."
+        )
+        return
+
+    previous_week = tomorrow - timedelta(days=7)
+
+    st.warning(
+        f"Ainda não há base suficiente para prever **{tomorrow_label} "
+        f"({tomorrow_formatted})**. Para gerar essa previsão, o sistema precisa "
+        f"de um registro equivalente na semana anterior, em **{previous_week.strftime('%d/%m/%Y')}**."
+    )
+
+    if not forecast_df.empty:
+        next_row = forecast_df.iloc[0]
+        same_date_rows = forecast_df[forecast_df["Data"] == next_row["Data"]]
+
+        total_plates = same_date_rows["Pratos"].sum()
+        total_kg = same_date_rows["Kg"].sum()
+
+        st.info(
+            f"Próxima previsão disponível: **{next_row['Dia da semana']} "
+            f"({next_row['Data']})**. Recomendação total: **{int(total_plates)} pratos** "
+            f"e aproximadamente **{total_kg:.1f} kg**."
+        )
+
+
 def show_prediction(school_id: int) -> None:
     page_header(
         "Previsão Inteligente",
-        "Recomendações de preparo com base no histórico da escola, taxa de desperdício, turno e alimentos utilizados.",
+        "Recomendações de preparo com base no histórico real da produção alimentar, turno, cardápio e desperdício.",
         "Planejamento alimentar",
     )
 
     production = db.production_df(school_id)
 
     if production.empty:
-        st.info("Ainda não há dados suficientes para gerar previsões. Registre produções alimentares primeiro.")
+        st.info(
+            "Ainda não há dados suficientes para gerar previsões. "
+            "Registre produções alimentares primeiro."
+        )
         return
 
     df = prepare_history(production)
 
+    if df.empty:
+        st.info(
+            "Ainda não há registros válidos de produção para calcular a previsão."
+        )
+        return
+
     if len(df) < 3:
-        st.warning("Cadastre pelo menos três registros de produção para melhorar a qualidade da previsão.")
+        st.warning(
+            "Cadastre mais registros de produção para melhorar a qualidade da previsão."
+        )
 
     metrics = calculate_general_metrics(df)
 
@@ -257,16 +323,14 @@ def show_prediction(school_id: int) -> None:
 
     forecast_df = build_forecast_table(df)
 
-    tomorrow_rows = forecast_df[forecast_df["Data"] == forecast_df.iloc[0]["Data"]]
-    tomorrow_total_plates = tomorrow_rows["Pratos"].sum()
-    tomorrow_total_kg = tomorrow_rows["Kg"].sum()
-    tomorrow_avg_success = tomorrow_rows["Sucesso"].mean()
+    if forecast_df.empty:
+        st.warning(
+            "Não há histórico recente suficiente para montar a previsão da próxima semana. "
+            "Cadastre registros de produção por dia e turno para que o sistema gere recomendações automáticas."
+        )
+        return
 
-    st.info(
-        f"Recomendação para amanhã: preparar **{int(tomorrow_total_plates)} pratos**, "
-        f"aproximadamente **{tomorrow_total_kg:.1f} kg**, considerando os turnos cadastrados. "
-        f"Sucesso médio previsto: **{tomorrow_avg_success:.1f}%**."
-    )
+    show_prediction_message(forecast_df)
 
     st.subheader("Tabela inteligente de previsão")
 
@@ -288,6 +352,7 @@ def show_prediction(school_id: int) -> None:
             "Kg": st.column_config.TextColumn("Quantidade em kg"),
             "Sucesso": st.column_config.TextColumn("Sucesso previsto"),
             "Desperdício": st.column_config.TextColumn("Desperdício previsto"),
+            "Base usada": st.column_config.TextColumn("Registro usado como base"),
         },
     )
 
@@ -302,14 +367,16 @@ def show_prediction(school_id: int) -> None:
 
     with col1:
         st.success(
-            f"Melhor cenário previsto: **{best_day['Dia da semana']} - {best_day['Turno']}**, "
-            f"com desperdício estimado de **{best_day['Desperdício']:.1f}%**."
+            f"Melhor cenário previsto: **{best_day['Dia da semana']} "
+            f"({best_day['Data']}) - {best_day['Turno']}**, com desperdício estimado de "
+            f"**{best_day['Desperdício']:.1f}%**."
         )
 
     with col2:
         st.warning(
-            f"Dia que exige mais atenção: **{attention_day['Dia da semana']} - {attention_day['Turno']}**, "
-            f"com desperdício estimado de **{attention_day['Desperdício']:.1f}%**."
+            f"Dia que exige mais atenção: **{attention_day['Dia da semana']} "
+            f"({attention_day['Data']}) - {attention_day['Turno']}**, com desperdício estimado de "
+            f"**{attention_day['Desperdício']:.1f}%**."
         )
 
     st.markdown("---")
@@ -320,19 +387,21 @@ def show_prediction(school_id: int) -> None:
         """
         <div class="info-card">
             <p>
-                A previsão do Renewtri utiliza os registros salvos no banco de dados da escola.
-                O sistema analisa a média recente de refeições produzidas, a média de desperdício,
-                o comportamento histórico do mesmo dia da semana e o turno em que a produção foi registrada.
+                A previsão do Renewtri utiliza apenas registros reais da produção alimentar.
+                Para prever um dia futuro, o sistema procura o registro equivalente da semana anterior,
+                no mesmo dia da semana e no mesmo turno.
             </p>
             <p>
-                Para sugerir os alimentos, o sistema consulta os cardápios registrados anteriormente.
-                Quando existe histórico do mesmo dia e turno, ele prioriza esse padrão. Quando não existe,
-                utiliza os alimentos mais recentes como referência.
+                Por exemplo: para prever uma sexta-feira, o sistema verifica se existe produção registrada
+                na sexta-feira anterior. Se não existir, ele não gera uma recomendação artificial para esse dia.
             </p>
             <p>
-                Para evitar desperdício, a recomendação aplica uma redução leve na quantidade prevista
-                quando a taxa de desperdício está alta. A quantidade em kg considera uma porção média de
-                <strong>0,45 kg por prato</strong>.
+                Domingos não entram no planejamento. Sábados só aparecem quando existe histórico de aula
+                ou produção registrada em sábado. A tabela é limitada a no máximo 14 previsões para manter
+                a visualização organizada.
+            </p>
+            <p>
+                A quantidade em kg considera uma porção média de <strong>0,45 kg por prato</strong>.
             </p>
         </div>
         """,
