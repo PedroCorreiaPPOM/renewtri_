@@ -121,7 +121,6 @@ def show_auth_page() -> None:
     st.markdown(
         """
         <div class="renewtri-hero">
-            <div class="eyebrow">MVP Hackathon TI</div>
             <h1>Renewtri</h1>
             <div class="subtitle">
                 Plataforma para gestão da merenda escolar, redução de desperdício
