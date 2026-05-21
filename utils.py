@@ -4,6 +4,7 @@ import re
 import string
 from datetime import date, datetime, timedelta
 
+import pandas as pd
 import streamlit as st
 
 
@@ -14,7 +15,6 @@ LIGHT_BG = "#f5fbfa"
 
 
 def apply_custom_css() -> None:
-    """Apply a polished visual layer over Streamlit's default components."""
     st.markdown(
         f"""
         <style>
@@ -40,28 +40,9 @@ def apply_custom_css() -> None:
             color: #eefdf8;
         }}
 
-        [data-testid="stSidebar"] .stRadio label {{
-            padding: .25rem 0;
-        }}
-
         h1, h2, h3 {{
             letter-spacing: 0;
             color: #0b2f3a;
-        }}
-
-        h1 {{
-            font-size: 2rem;
-            font-weight: 800;
-        }}
-
-        h2 {{
-            font-size: 1.4rem;
-            font-weight: 760;
-        }}
-
-        h3 {{
-            font-size: 1.05rem;
-            font-weight: 720;
         }}
 
         .renewtri-hero {{
@@ -130,14 +111,9 @@ def apply_custom_css() -> None:
             box-shadow: 0 10px 26px rgba(7,59,76,.06);
         }}
 
-        .info-card strong {{
-            color: #063b46;
-        }}
-
         .badge {{
             display: inline-flex;
             align-items: center;
-            gap: .35rem;
             border-radius: 999px;
             padding: .2rem .65rem;
             background: rgba(15,159,110,.12);
@@ -154,22 +130,6 @@ def apply_custom_css() -> None:
             color: white;
             font-weight: 750;
             min-height: 2.6rem;
-        }}
-
-        .stButton > button:hover {{
-            border-color: rgba(255,255,255,.4);
-            box-shadow: 0 10px 22px rgba(11,111,184,.22);
-        }}
-
-        div[data-testid="stDataFrame"] {{
-            border: 1px solid var(--renewtri-border);
-            border-radius: 8px;
-            overflow: hidden;
-        }}
-
-        .small-muted {{
-            color: var(--renewtri-muted);
-            font-size: .86rem;
         }}
         </style>
         """,
@@ -203,20 +163,6 @@ def metric_card(label: str, value: str, help_text: str = "") -> None:
     )
 
 
-def info_card(title: str, body: str, badge: str | None = None) -> None:
-    badge_html = f'<div class="badge">{badge}</div>' if badge else ""
-    st.markdown(
-        f"""
-        <div class="info-card">
-            {badge_html}
-            <h3>{title}</h3>
-            <p>{body}</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
@@ -231,14 +177,16 @@ def normalize_cnpj(cnpj: str) -> str:
 
 def format_cnpj(cnpj: str) -> str:
     digits = normalize_cnpj(cnpj)
+
     if len(digits) != 14:
         return cnpj
+
     return f"{digits[:2]}.{digits[2:5]}.{digits[5:8]}/{digits[8:12]}-{digits[12:]}"
 
 
 def validate_cnpj(cnpj: str) -> bool:
-    """Validate Brazilian CNPJ using official check-digit rules."""
     digits = normalize_cnpj(cnpj)
+
     if len(digits) != 14 or digits == digits[0] * 14:
         return False
 
@@ -249,8 +197,10 @@ def validate_cnpj(cnpj: str) -> bool:
 
     first_weights = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
     second_weights = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+
     first_digit = calc_digit(digits[:12], first_weights)
     second_digit = calc_digit(digits[:12] + first_digit, second_weights)
+
     return digits[-2:] == first_digit + second_digit
 
 
@@ -267,8 +217,10 @@ def today_iso() -> str:
 def as_date(value: str | date | datetime) -> date:
     if isinstance(value, datetime):
         return value.date()
+
     if isinstance(value, date):
         return value
+
     return datetime.strptime(str(value), "%Y-%m-%d").date()
 
 
@@ -304,16 +256,11 @@ def plotly_layout(fig, title: str | None = None):
         font=dict(family="Inter, Segoe UI, Arial", color="#102a43"),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
+
     fig.update_xaxes(showgrid=False)
     fig.update_yaxes(gridcolor="#e8f1ef")
+
     return fig
-
-
-def require_login() -> bool:
-    if not st.session_state.get("authenticated"):
-        st.warning("Faça login para acessar a plataforma.")
-        return False
-    return True
 
 
 def current_school_id() -> int | None:
@@ -322,3 +269,24 @@ def current_school_id() -> int | None:
 
 def current_user_role() -> str | None:
     return st.session_state.get("role")
+
+
+def prepare_table_display(
+    df: pd.DataFrame,
+    hidden_columns: list[str] | None = None,
+    date_columns: list[str] | None = None,
+) -> pd.DataFrame:
+    display_df = df.copy()
+
+    for column in hidden_columns or []:
+        if column in display_df.columns:
+            display_df = display_df.drop(columns=[column])
+
+    for column in date_columns or []:
+        if column in display_df.columns:
+            display_df[column] = pd.to_datetime(
+                display_df[column],
+                errors="coerce",
+            ).dt.strftime("%d/%m/%Y")
+
+    return display_df
