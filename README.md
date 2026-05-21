@@ -55,6 +55,6 @@ O Renewtri busca contribuir para:
 - conscientização ambiental nas escolas públicas;
 - uso inteligente de dados na gestão escolar.
 
-## Desenvolvido para
+## 
 
 Projeto desenvolvido como MVP para hackathon e iniciativas de inovação tecnológica voltadas à educação e sustentabilidade.
