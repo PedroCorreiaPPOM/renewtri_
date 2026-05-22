@@ -1,9 +1,63 @@
 from datetime import date, timedelta
 
+import pandas as pd
 import streamlit as st
 
 import database as db
 from utils import metric_card, page_header, prepare_table_display
+
+
+def format_inventory_option(row: pd.Series) -> str:
+    record_date = pd.to_datetime(row["data"]).strftime("%d/%m/%Y")
+    quantity = float(row["quantidade_kg"])
+    return f"{record_date} - {row['alimento']} - {quantity:.1f} kg"
+
+
+def show_delete_inventory_control(inventory: pd.DataFrame, school_id: int) -> None:
+    if inventory.empty:
+        return
+
+    st.markdown("#### Apagar registro")
+
+    options = {
+        format_inventory_option(row): int(row["id"])
+        for _, row in inventory.iterrows()
+    }
+
+    selected_label = st.selectbox(
+        "Selecione o alimento recebido",
+        list(options.keys()),
+        key="inventory_delete_select",
+    )
+
+    if st.button("Apagar registro", key="request_delete_inventory"):
+        st.session_state.pending_delete_inventory_id = options[selected_label]
+        st.session_state.pending_delete_inventory_label = selected_label
+
+    pending_id = st.session_state.get("pending_delete_inventory_id")
+    pending_label = st.session_state.get("pending_delete_inventory_label")
+
+    if pending_id:
+        st.warning(
+            f"Tem certeza que deseja apagar o registro **{pending_label}**? "
+            "Essa ação não pode ser desfeita."
+        )
+
+        confirm_col, cancel_col = st.columns(2)
+
+        with confirm_col:
+            if st.button("Sim, apagar", type="primary", key="confirm_delete_inventory"):
+                db.delete_inventory(int(pending_id), school_id)
+                st.session_state.pop("pending_delete_inventory_id", None)
+                st.session_state.pop("pending_delete_inventory_label", None)
+                st.success("Registro de alimento recebido apagado com sucesso.")
+                st.rerun()
+
+        with cancel_col:
+            if st.button("Cancelar", key="cancel_delete_inventory"):
+                st.session_state.pop("pending_delete_inventory_id", None)
+                st.session_state.pop("pending_delete_inventory_label", None)
+                st.rerun()
 
 
 def show_food_inventory(school_id: int) -> None:
@@ -119,3 +173,5 @@ def show_food_inventory(school_id: int) -> None:
                 "observacoes": "Observações",
             },
         )
+
+        show_delete_inventory_control(inventory, school_id)

@@ -13,6 +13,7 @@ DEMO_SCHOOL_EMAIL = "escola@renewtri.demo"
 DEMO_EMPLOYEE_EMAIL = "robertina@renewtri.demo"
 DEMO_PRODUCTION_NOTE = "Registro demonstrativo para acompanhamento do MVP."
 DEMO_INVENTORY_NOTE = "Entrada demonstrativa para controle de estoque."
+DEMO_SEED_MARKER = "demo_operational_seed_v2"
 
 
 def get_connection() -> sqlite3.Connection:
@@ -123,7 +124,9 @@ def create_tables(conn: sqlite3.Connection) -> None:
 def seed_demo_data(conn: sqlite3.Connection) -> None:
     school_id = ensure_demo_school(conn)
     employee_id = ensure_demo_employees(conn, school_id)
-    seed_demo_operational_data(conn, school_id, employee_id)
+    if not demo_seed_applied(conn, school_id):
+        seed_demo_operational_data(conn, school_id, employee_id)
+        mark_demo_seed_applied(conn, school_id)
     conn.commit()
 
 
@@ -257,6 +260,32 @@ def clear_demo_operational_data(conn: sqlite3.Connection, school_id: int) -> Non
         WHERE escola_id = ? AND observacoes = ?
         """,
         (school_id, DEMO_INVENTORY_NOTE),
+    )
+
+
+def demo_seed_applied(conn: sqlite3.Connection, school_id: int) -> bool:
+    marker = conn.execute(
+        """
+        SELECT id
+        FROM acessos
+        WHERE escola_id = ?
+          AND usuario_tipo = 'sistema'
+          AND usuario_email = ?
+          AND mensagem = ?
+        LIMIT 1
+        """,
+        (school_id, DEMO_SCHOOL_EMAIL, DEMO_SEED_MARKER),
+    ).fetchone()
+    return marker is not None
+
+
+def mark_demo_seed_applied(conn: sqlite3.Connection, school_id: int) -> None:
+    conn.execute(
+        """
+        INSERT INTO acessos (escola_id, usuario_tipo, usuario_email, sucesso, mensagem)
+        VALUES (?, 'sistema', ?, 1, ?)
+        """,
+        (school_id, DEMO_SCHOOL_EMAIL, DEMO_SEED_MARKER),
     )
 
 
@@ -508,6 +537,33 @@ def insert_inventory(
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         (school_id, data, fornecedor, alimento, quantidade_kg, validade, observacoes),
+    )
+
+
+def delete_production(production_id: int, school_id: int) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            """
+            DELETE FROM desperdicio
+            WHERE producao_id IN (
+                SELECT id
+                FROM producao_alimentar
+                WHERE id = ? AND escola_id = ?
+            )
+            """,
+            (production_id, school_id),
+        )
+        conn.execute(
+            "DELETE FROM producao_alimentar WHERE id = ? AND escola_id = ?",
+            (production_id, school_id),
+        )
+        conn.commit()
+
+
+def delete_inventory(inventory_id: int, school_id: int) -> None:
+    execute(
+        "DELETE FROM alimentos_recebidos WHERE id = ? AND escola_id = ?",
+        (inventory_id, school_id),
     )
 
 

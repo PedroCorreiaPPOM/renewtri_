@@ -1,9 +1,63 @@
 from datetime import date
 
+import pandas as pd
 import streamlit as st
 
 import database as db
 from utils import current_user_role, metric_card, page_header, prepare_table_display, turnos
+
+
+def format_production_option(row: pd.Series) -> str:
+    record_date = pd.to_datetime(row["data"]).strftime("%d/%m/%Y")
+    meals = int(row["refeicoes_produzidas"])
+    return f"{record_date} - {row['turno']} - {meals} refeições"
+
+
+def show_delete_production_control(history: pd.DataFrame, school_id: int) -> None:
+    if history.empty:
+        return
+
+    st.markdown("#### Apagar registro")
+
+    options = {
+        format_production_option(row): int(row["id"])
+        for _, row in history.iterrows()
+    }
+
+    selected_label = st.selectbox(
+        "Selecione o registro de produção",
+        list(options.keys()),
+        key="production_delete_select",
+    )
+
+    if st.button("Apagar registro", key="request_delete_production"):
+        st.session_state.pending_delete_production_id = options[selected_label]
+        st.session_state.pending_delete_production_label = selected_label
+
+    pending_id = st.session_state.get("pending_delete_production_id")
+    pending_label = st.session_state.get("pending_delete_production_label")
+
+    if pending_id:
+        st.warning(
+            f"Tem certeza que deseja apagar o registro **{pending_label}**? "
+            "Essa ação não pode ser desfeita."
+        )
+
+        confirm_col, cancel_col = st.columns(2)
+
+        with confirm_col:
+            if st.button("Sim, apagar", type="primary", key="confirm_delete_production"):
+                db.delete_production(int(pending_id), school_id)
+                st.session_state.pop("pending_delete_production_id", None)
+                st.session_state.pop("pending_delete_production_label", None)
+                st.success("Registro de produção apagado com sucesso.")
+                st.rerun()
+
+        with cancel_col:
+            if st.button("Cancelar", key="cancel_delete_production"):
+                st.session_state.pop("pending_delete_production_id", None)
+                st.session_state.pop("pending_delete_production_label", None)
+                st.rerun()
 
 
 def show_food_production(school_id: int) -> None:
@@ -123,3 +177,5 @@ def show_food_production(school_id: int) -> None:
                 "registrado_por": "Registrado por",
             },
         )
+
+        show_delete_production_control(history, school_id)
