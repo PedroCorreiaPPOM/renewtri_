@@ -9,6 +9,11 @@ from utils import generate_school_code, hash_password, normalize_cnpj
 
 DB_PATH = Path(__file__).with_name("renewtri.sqlite3")
 
+DEMO_SCHOOL_EMAIL = "escola@renewtri.demo"
+DEMO_EMPLOYEE_EMAIL = "robertina@renewtri.demo"
+DEMO_PRODUCTION_NOTE = "Registro demonstrativo para acompanhamento do MVP."
+DEMO_INVENTORY_NOTE = "Entrada demonstrativa para controle de estoque."
+
 
 def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=30)
@@ -116,33 +121,82 @@ def create_tables(conn: sqlite3.Connection) -> None:
 
 
 def seed_demo_data(conn: sqlite3.Connection) -> None:
-    exists = conn.execute("SELECT COUNT(*) FROM escolas").fetchone()[0]
-    if exists:
-        return
+    school_id = ensure_demo_school(conn)
+    employee_id = ensure_demo_employees(conn, school_id)
+    seed_demo_operational_data(conn, school_id, employee_id)
+    conn.commit()
+
+
+def ensure_demo_school(conn: sqlite3.Connection) -> int:
+    school = conn.execute(
+        "SELECT id FROM escolas WHERE lower(email) = lower(?)",
+        (DEMO_SCHOOL_EMAIL,),
+    ).fetchone()
+
+    if school:
+        conn.execute(
+            """
+            UPDATE escolas
+            SET nome = ?, cnpj = ?, codigo_inep = ?
+            WHERE id = ?
+            """,
+            (
+                "CETI Prefeito João Mendes Olímpio de Melo",
+                normalize_cnpj("11.222.333/0001-81"),
+                "22123456",
+                school["id"],
+            ),
+        )
+        return int(school["id"])
 
     school_code = generate_school_code("CETI Prefeito Joao Mendes Olimpo de Melo")
-    conn.execute(
+    while conn.execute(
+        "SELECT id FROM escolas WHERE upper(codigo_escola) = upper(?)",
+        (school_code,),
+    ).fetchone():
+        school_code = generate_school_code("CETI Prefeito Joao Mendes Olimpo de Melo")
+
+    cursor = conn.execute(
         """
         INSERT INTO escolas (nome, email, cnpj, codigo_inep, codigo_escola, senha_hash)
         VALUES (?, ?, ?, ?, ?, ?)
         """,
         (
             "CETI Prefeito João Mendes Olímpio de Melo",
-            "escola@renewtri.demo",
+            DEMO_SCHOOL_EMAIL,
             normalize_cnpj("11.222.333/0001-81"),
             "22123456",
             school_code,
             hash_password("renewtri123"),
         ),
     )
-    school_id = conn.execute("SELECT id FROM escolas WHERE email = ?", ("escola@renewtri.demo",)).fetchone()[0]
+    return int(cursor.lastrowid)
 
+
+def ensure_demo_employees(conn: sqlite3.Connection, school_id: int) -> int | None:
     employees = [
-        ("Robertina Alves", "robertina@renewtri.demo"),
+        ("Robertina Alves", DEMO_EMPLOYEE_EMAIL),
         ("Maria do Socorro", "socorro@renewtri.demo"),
         ("Ana Clara Santos", "ana@renewtri.demo"),
     ]
+
     for name, email in employees:
+        employee = conn.execute(
+            "SELECT id FROM merendeiras WHERE lower(email) = lower(?)",
+            (email,),
+        ).fetchone()
+
+        if employee:
+            conn.execute(
+                """
+                UPDATE merendeiras
+                SET escola_id = ?, nome = ?, senha_hash = ?, ativo = 1
+                WHERE id = ?
+                """,
+                (school_id, name, hash_password("merenda123"), employee["id"]),
+            )
+            continue
+
         conn.execute(
             """
             INSERT INTO merendeiras (escola_id, nome, email, senha_hash, ativo)
@@ -151,70 +205,128 @@ def seed_demo_data(conn: sqlite3.Connection) -> None:
             (school_id, name, email, hash_password("merenda123")),
         )
 
-    merendeira_id = conn.execute(
-        "SELECT id FROM merendeiras WHERE email = ?", ("robertina@renewtri.demo",)
-    ).fetchone()[0]
+    employee = conn.execute(
+        """
+        SELECT id
+        FROM merendeiras
+        WHERE escola_id = ? AND lower(email) = lower(?)
+        """,
+        (school_id, DEMO_EMPLOYEE_EMAIL),
+    ).fetchone()
 
-    base = date.today() - timedelta(days=80)
-    turnos = ["Manhã", "Tarde"]
-    meals = [178, 184, 176, 190, 168, 162, 172, 181, 186, 193, 174, 166]
-    wastes = [17.5, 14.2, 12.8, 11.4, 10.7, 9.6, 9.2, 8.8, 8.1, 7.4, 7.0, 6.5]
-    foods = [
+    return int(employee["id"]) if employee else None
+
+
+def recent_school_days(limit: int) -> list[date]:
+    days: list[date] = []
+    current = date.today()
+
+    while len(days) < limit:
+        if current.weekday() < 5:
+            days.append(current)
+        current -= timedelta(days=1)
+
+    return sorted(days)
+
+
+def clear_demo_operational_data(conn: sqlite3.Connection, school_id: int) -> None:
+    demo_productions = conn.execute(
+        """
+        SELECT id
+        FROM producao_alimentar
+        WHERE escola_id = ? AND observacoes = ?
+        """,
+        (school_id, DEMO_PRODUCTION_NOTE),
+    ).fetchall()
+
+    production_ids = [row["id"] for row in demo_productions]
+    if production_ids:
+        placeholders = ",".join("?" for _ in production_ids)
+        conn.execute(
+            f"DELETE FROM desperdicio WHERE producao_id IN ({placeholders})",
+            tuple(production_ids),
+        )
+        conn.execute(
+            f"DELETE FROM producao_alimentar WHERE id IN ({placeholders})",
+            tuple(production_ids),
+        )
+
+    conn.execute(
+        """
+        DELETE FROM alimentos_recebidos
+        WHERE escola_id = ? AND observacoes = ?
+        """,
+        (school_id, DEMO_INVENTORY_NOTE),
+    )
+
+
+def seed_demo_operational_data(
+    conn: sqlite3.Connection,
+    school_id: int,
+    employee_id: int | None,
+) -> None:
+    clear_demo_operational_data(conn, school_id)
+
+    turns = ["Manhã", "Tarde"]
+    menus = [
         "Arroz, feijão, frango e salada",
         "Cuscuz, ovos e suco",
         "Macarrão, carne moída e legumes",
         "Baião de dois, frango e frutas",
+        "Arroz, carne, abóbora e suco",
+        "Feijão tropeiro, arroz e banana",
+        "Sopa nutritiva, pão e fruta",
     ]
+    meals = [176, 168, 184, 172, 190, 178, 182, 170, 186, 174, 188, 180, 192, 176]
+    wastes = [8.4, 7.8, 6.9, 6.4, 8.1, 7.2, 5.9, 5.5, 7.0, 6.1, 6.8, 5.7, 7.4, 6.0]
 
-    for index in range(72):
-        current = base + timedelta(days=index)
-        if current.weekday() >= 5:
-            continue
-        turno = turnos[index % len(turnos)]
-        produced = meals[index % len(meals)] + (index % 6) * 3
-        waste = max(3.8, wastes[index % len(wastes)] - (index // 12) * 0.8)
-        cursor = conn.execute(
-            """
-            INSERT INTO producao_alimentar
-                (escola_id, merendeira_id, data, turno, refeicoes_produzidas, alimentos_utilizados, observacoes)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                school_id,
-                merendeira_id,
-                current.isoformat(),
-                turno,
-                produced,
-                foods[index % len(foods)],
-                "Registro demonstrativo para acompanhamento do MVP.",
-            ),
-        )
-        production_id = cursor.lastrowid
-        conn.execute(
-            """
-            INSERT INTO desperdicio (escola_id, producao_id, data, turno, quantidade_kg, observacoes)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                school_id,
-                production_id,
-                current.isoformat(),
-                turno,
-                round(waste, 2),
-                "Sobra registrada após a distribuição.",
-            ),
-        )
+    for index, current in enumerate(recent_school_days(7)):
+        for turn_index, turn in enumerate(turns):
+            row_index = (index * len(turns)) + turn_index
+            cursor = conn.execute(
+                """
+                INSERT INTO producao_alimentar
+                    (escola_id, merendeira_id, data, turno, refeicoes_produzidas, alimentos_utilizados, observacoes)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    school_id,
+                    employee_id,
+                    current.isoformat(),
+                    turn,
+                    meals[row_index],
+                    menus[row_index % len(menus)],
+                    DEMO_PRODUCTION_NOTE,
+                ),
+            )
+            production_id = cursor.lastrowid
+            conn.execute(
+                """
+                INSERT INTO desperdicio (escola_id, producao_id, data, turno, quantidade_kg, observacoes)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    school_id,
+                    production_id,
+                    current.isoformat(),
+                    turn,
+                    wastes[row_index],
+                    "Sobra demonstrativa após a distribuição.",
+                ),
+            )
 
     inventory = [
-        ("Cooperativa Sertão Verde", "Arroz", 20, 45),
-        ("Frigorífico Boa Mesa", "Carne", 10, 18),
-        ("Fornecedor Nordeste", "Cuscuz", 15, 90),
+        ("Cooperativa Sertão Verde", "Arroz", 22, 45),
+        ("Grãos Piauí", "Feijão", 18, 50),
+        ("Frigorífico Boa Mesa", "Frango", 14, 12),
+        ("Fornecedor Nordeste", "Cuscuz", 16, 80),
         ("Hortifruti Escolar", "Legumes", 12, 7),
-        ("Grãos Piauí", "Feijão", 18, 60),
-        ("Laticínios União", "Leite", 25, 10),
+        ("Laticínios União", "Leite", 24, 9),
+        ("Padaria Escola", "Pão", 10, 5),
     ]
-    for index in range(24):
-        current = base + timedelta(days=index * 3)
+
+    for index in range(14):
+        current = date.today() - timedelta(days=index)
         supplier, food, qty, valid_days = inventory[index % len(inventory)]
         conn.execute(
             """
@@ -227,13 +339,11 @@ def seed_demo_data(conn: sqlite3.Connection) -> None:
                 current.isoformat(),
                 supplier,
                 food,
-                qty + (index % 4) * 2,
+                qty + (index % 3) * 2,
                 (current + timedelta(days=valid_days)).isoformat(),
-                "Entrada demonstrativa para controle de estoque.",
+                DEMO_INVENTORY_NOTE,
             ),
         )
-
-    conn.commit()
 
 
 def register_access(
@@ -282,7 +392,10 @@ def school_by_email_and_cnpj(email: str, cnpj: str):
 
 
 def school_by_code(code: str):
-    return fetch_one("SELECT * FROM escolas WHERE upper(codigo_escola) = upper(?)", (code.strip(),))
+    return fetch_one(
+        "SELECT * FROM escolas WHERE upper(codigo_escola) = upper(?)",
+        (code.strip(),),
+    )
 
 
 def employee_by_email(email: str):
