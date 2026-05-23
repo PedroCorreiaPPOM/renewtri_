@@ -46,7 +46,7 @@ Com base nos dados armazenados, o sistema gera:
 
 ## Impacto Social
 
-O Renewtri busca contribuir para:
+O Renewtri visa contribuir para:
 - redução do desperdício alimentar;
 - melhor planejamento da merenda escolar;
 - incentivo à sustentabilidade;
