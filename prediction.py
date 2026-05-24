@@ -123,11 +123,6 @@ def calculate_recommendation(base_meals: float, base_waste_rate: float) -> tuple
 
 
 def build_forecast_table(df: pd.DataFrame) -> pd.DataFrame:
-    recent_history = df[df["data"] >= df["data"].max() - pd.Timedelta(days=30)]
-
-    if recent_history.empty:
-        recent_history = df
-
     forecast_rows = []
 
     for day_offset in range(1, LOOKAHEAD_DAYS + 1):
@@ -210,7 +205,6 @@ def show_prediction_message(forecast_df: pd.DataFrame) -> None:
     tomorrow = date.today() + timedelta(days=1)
     tomorrow_label = WEEKDAYS[tomorrow.weekday()]
     tomorrow_formatted = tomorrow.strftime("%d/%m/%Y")
-
     tomorrow_rows = forecast_df[forecast_df["Data"] == tomorrow_formatted]
 
     if not tomorrow_rows.empty:
@@ -226,33 +220,17 @@ def show_prediction_message(forecast_df: pd.DataFrame) -> None:
         )
         return
 
-    if tomorrow.weekday() == 6:
-        st.warning(
-            f"Não há previsão para **{tomorrow_label} ({tomorrow_formatted})**, "
-            "pois domingo não é considerado dia letivo no planejamento."
-        )
-        return
+    next_row = forecast_df.iloc[0]
+    same_date_rows = forecast_df[forecast_df["Data"] == next_row["Data"]]
 
-    previous_week = tomorrow - timedelta(days=7)
+    total_plates = same_date_rows["Pratos"].sum()
+    total_kg = same_date_rows["Kg"].sum()
 
-    st.warning(
-        f"Ainda não há base suficiente para prever **{tomorrow_label} "
-        f"({tomorrow_formatted})**. Para gerar essa previsão, o sistema precisa "
-        f"de um registro equivalente na semana anterior, em **{previous_week.strftime('%d/%m/%Y')}**."
+    st.info(
+        f"Próxima previsão disponível: **{next_row['Dia da semana']} "
+        f"({next_row['Data']})**. Recomendação total: **{int(total_plates)} pratos** "
+        f"e aproximadamente **{total_kg:.1f} kg**."
     )
-
-    if not forecast_df.empty:
-        next_row = forecast_df.iloc[0]
-        same_date_rows = forecast_df[forecast_df["Data"] == next_row["Data"]]
-
-        total_plates = same_date_rows["Pratos"].sum()
-        total_kg = same_date_rows["Kg"].sum()
-
-        st.info(
-            f"Próxima previsão disponível: **{next_row['Dia da semana']} "
-            f"({next_row['Data']})**. Recomendação total: **{int(total_plates)} pratos** "
-            f"e aproximadamente **{total_kg:.1f} kg**."
-        )
 
 
 def show_prediction(school_id: int) -> None:
@@ -378,31 +356,3 @@ def show_prediction(school_id: int) -> None:
             f"**{attention_day['Desperdício']:.1f}%**."
         )
 
-    st.markdown("---")
-
-    st.subheader("Como o sistema calcula a previsão")
-
-    st.markdown(
-        """
-        <div class="info-card">
-            <p>
-                A previsão do Renewtri utiliza apenas registros reais da produção alimentar.
-                Para prever um dia futuro, o sistema procura o registro equivalente da semana anterior,
-                no mesmo dia da semana e no mesmo turno.
-            </p>
-            <p>
-                Por exemplo: para prever uma sexta-feira, o sistema verifica se existe produção registrada
-                na sexta-feira anterior. Se não existir, ele não gera uma recomendação artificial para esse dia.
-            </p>
-            <p>
-                Domingos não entram no planejamento. Sábados só aparecem quando existe histórico de aula
-                ou produção registrada em sábado. A tabela é limitada a no máximo 14 previsões para manter
-                a visualização organizada.
-            </p>
-            <p>
-                A quantidade em kg considera uma porção média de <strong>0,45 kg por prato</strong>.
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
