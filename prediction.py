@@ -335,7 +335,7 @@ def show_prediction(school_id: int) -> None:
     st.subheader("Tabela inteligente de previsão")
 
     table_df = forecast_df.copy()
-    table_df["Kg"] = table_df["Kg"].map(lambda value: f"{value:.1f} kg")
+    table_df = table_df.drop(columns=["Kg"])
     table_df["Sucesso"] = table_df["Sucesso"].map(lambda value: f"{value:.1f}%")
     table_df["Desperdício"] = table_df["Desperdício"].map(lambda value: f"{value:.1f}%")
 
@@ -349,7 +349,6 @@ def show_prediction(school_id: int) -> None:
             "Turno": st.column_config.TextColumn("Turno"),
             "Alimentos sugeridos": st.column_config.TextColumn("Alimentos sugeridos"),
             "Pratos": st.column_config.NumberColumn("Pratos recomendados"),
-            "Kg": st.column_config.TextColumn("Quantidade em kg"),
             "Sucesso": st.column_config.TextColumn("Sucesso previsto"),
             "Desperdício": st.column_config.TextColumn("Desperdício previsto"),
             "Base usada": st.column_config.TextColumn("Registro usado como base"),
