@@ -193,7 +193,7 @@ def ensure_demo_employees(conn: sqlite3.Connection, school_id: int) -> int | Non
             conn.execute(
                 """
                 UPDATE merendeiras
-                SET escola_id = ?, nome = ?, senha_hash = ?, ativo = 1
+                SET escola_id = ?, nome = ?, senha_hash = ?
                 WHERE id = ?
                 """,
                 (school_id, name, hash_password("merenda123"), employee["id"]),

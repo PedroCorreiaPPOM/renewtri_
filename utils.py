@@ -131,6 +131,12 @@ def apply_custom_css() -> None:
             font-weight: 750;
             min-height: 2.6rem;
         }}
+
+        [data-testid="InputInstructions"] {{
+            display: none !important;
+            visibility: hidden !important;
+            height: 0 !important;
+        }}
         </style>
         """,
         unsafe_allow_html=True,

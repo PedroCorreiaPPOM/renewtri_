@@ -36,7 +36,7 @@ def login_user(
 
         if not school or not validate_password(password, school["senha_hash"]):
             db.register_access("instituicao", email, False, "Login inválido")
-            st.error("Email, CNPJ ou senha da instituição estão incorretos.")
+            st.error("E-mail, CNPJ ou senha da instituição estão incorretos.")
             return False
 
         set_authenticated_school(school)
@@ -47,7 +47,7 @@ def login_user(
 
     if not employee or not validate_password(password, employee["senha_hash"]):
         db.register_access("merendeira", email, False, "Login inválido")
-        st.error("Email ou senha da merendeira estão incorretos.")
+        st.error("E-mail ou senha da merendeira estão incorretos.")
         return False
 
     if not employee["ativo"]:
@@ -146,7 +146,7 @@ def show_auth_page() -> None:
             )
 
             with st.form("login_form"):
-                email = st.text_input("Email")
+                email = st.text_input("E-mail")
 
                 school_code = None
                 cnpj = None
@@ -162,7 +162,7 @@ def show_auth_page() -> None:
 
             if submitted:
                 if not valid_email(email):
-                    st.error("Informe um email válido.")
+                    st.error("Informe um e-mail válido.")
                 elif role == "Instituição de ensino" and len(normalize_cnpj(cnpj or "")) != 14:
                     st.error("Informe um CNPJ válido.")
                 elif not password:
@@ -176,12 +176,12 @@ def show_auth_page() -> None:
                 st.markdown("#### Dados de demonstração")
 
                 st.markdown("**Instituição**")
-                st.write("Email: escola@renewtri.demo")
+                st.write("E-mail: escola@renewtri.demo")
                 st.write("CNPJ: 11.222.333/0001-81")
                 st.write("Senha: renewtri123")
 
                 st.markdown("**Merendeira**")
-                st.write("Email: robertina@renewtri.demo")
+                st.write("E-mail: robertina@renewtri.demo")
                 st.write("Senha: merenda123")
                 st.write("Código: aparece ao entrar como instituição.")
 
@@ -190,7 +190,7 @@ def show_auth_page() -> None:
 
         with st.form("register_school_form"):
             nome = st.text_input("Nome da instituição")
-            email = st.text_input("Email institucional")
+            email = st.text_input("E-mail institucional")
             cnpj = st.text_input("CNPJ", placeholder="00.000.000/0000-00")
             codigo_inep = st.text_input("Código INEP")
             senha = st.text_input("Senha", type="password")
@@ -201,13 +201,13 @@ def show_auth_page() -> None:
             if not all([nome, email, cnpj, codigo_inep, senha, confirmar]):
                 st.error("Preencha todos os campos.")
             elif not valid_email(email):
-                st.error("Informe um email válido.")
+                st.error("Informe um e-mail válido.")
             elif not validate_cnpj(cnpj):
                 st.error("CNPJ inválido. Verifique os números informados.")
             elif db.cnpj_exists(cnpj):
                 st.error("Este CNPJ já está cadastrado.")
             elif db.school_by_email(email):
-                st.error("Este email já está cadastrado.")
+                st.error("Este e-mail já está cadastrado.")
             elif senha != confirmar:
                 st.error("As senhas não conferem.")
             elif len(senha) < 6:

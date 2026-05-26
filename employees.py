@@ -5,6 +5,15 @@ from auth import valid_email
 from utils import metric_card, page_header, prepare_table_display
 
 
+def valid_employee_password(password: str) -> bool:
+    has_minimum_length = len(password) >= 8
+    has_uppercase = any(char.isupper() for char in password)
+    has_lowercase = any(char.islower() for char in password)
+    has_number = any(char.isdigit() for char in password)
+    has_special = any(not char.isalnum() for char in password)
+    return all([has_minimum_length, has_uppercase, has_lowercase, has_number, has_special])
+
+
 def show_employees(school_id: int) -> None:
     school = db.get_school(school_id)
 
@@ -21,19 +30,26 @@ def show_employees(school_id: int) -> None:
 
         with st.form("employee_form", clear_on_submit=True):
             nome = st.text_input("Nome completo")
-            email = st.text_input("Email")
+            email = st.text_input("E-mail")
             senha = st.text_input("Senha inicial", type="password")
+            st.caption(
+                "A senha deve ter no mínimo 8 caracteres, com letra maiúscula, "
+                "letra minúscula, número e caractere especial."
+            )
             submitted = st.form_submit_button("Cadastrar merendeira")
 
         if submitted:
             if not nome.strip() or not email.strip() or not senha:
                 st.error("Preencha todos os campos.")
             elif not valid_email(email):
-                st.error("Informe um email válido.")
+                st.error("Informe um e-mail válido.")
             elif db.employee_by_email(email):
-                st.error("Este email já está cadastrado para uma merendeira.")
-            elif len(senha) < 6:
-                st.error("A senha deve ter pelo menos 6 caracteres.")
+                st.error("Este e-mail já está cadastrado para uma merendeira.")
+            elif not valid_employee_password(senha):
+                st.error(
+                    "A senha deve ter no mínimo 8 caracteres, com letra maiúscula, "
+                    "letra minúscula, número e caractere especial."
+                )
             else:
                 db.create_employee(
                     school_id,
@@ -67,15 +83,17 @@ def show_employees(school_id: int) -> None:
             st.markdown(f"**{row['nome']}**")
             st.caption(row["email"])
 
+        is_active = bool(int(row["ativo"]))
+
         with col_status:
-            status = "Ativa" if row["ativo"] else "Desativada"
+            status = "Ativa" if is_active else "Desativada"
             st.markdown(
                 f"<span class='badge'>{status}</span>",
                 unsafe_allow_html=True,
             )
 
         with col_action:
-            if row["ativo"]:
+            if is_active:
                 if st.button("Desativar", key=f"disable_{row['id']}"):
                     db.set_employee_status(int(row["id"]), False, school_id)
                     st.rerun()
@@ -96,7 +114,7 @@ def show_employees(school_id: int) -> None:
         hide_index=True,
         column_config={
             "nome": "Nome",
-            "email": "Email",
+            "email": "E-mail",
             "ativo": "Ativo",
             "created_at": "Criada em",
         },

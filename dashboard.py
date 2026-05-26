@@ -41,7 +41,7 @@ def calculate_metrics(production: pd.DataFrame, inventory: pd.DataFrame) -> dict
 
 def show_dashboard(school_id: int) -> None:
     page_header(
-        "Dashboard principal",
+        "Tela Principal",
         "Acompanhe produção, desperdício, estoque recebido e indicadores de sustentabilidade em tempo real.",
         "Gestão inteligente da merenda",
     )
