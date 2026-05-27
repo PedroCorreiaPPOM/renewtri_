@@ -3,14 +3,7 @@ import plotly.express as px
 import streamlit as st
 
 import database as db
-from utils import format_int, format_kg, format_percent, metric_card, page_header, plotly_layout
-
-
-def calculate_metrics(production: pd.DataFrame, inventory: pd.DataFrame) -> dict[str, float]:
-    meals = float(production["refeicoes_produzidas"].sum()) if not production.empty else 0.0
-    waste = float(production["desperdicio_kg"].sum()) if not production.empty else 0.0
-    received = float(inventory["quantidade_kg"].sum()) if not inventory.empty else 0.0
-    waste_rate = (waste / meals * 100) if meals else 0.0
+from utils import format_int, format_kg, format_percent, metric_card,
 
     if not production.empty:
         production = production.copy()
