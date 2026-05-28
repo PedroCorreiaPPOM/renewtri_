@@ -93,11 +93,21 @@ def show_dashboard(school_id: int) -> None:
 
     chart_df = production.copy()
     chart_df["data"] = pd.to_datetime(chart_df["data"])
-    chart_df["mes"] = chart_df["data"].dt.to_period("M").astype(str)
+    chart_df["mes_periodo"] = chart_df["data"].dt.to_period("M")
 
-    monthly = chart_df.groupby("mes", as_index=False).agg(
-        refeicoes_produzidas=("refeicoes_produzidas", "sum"),
-        desperdicio_kg=("desperdicio_kg", "sum"),
+    monthly = (
+        chart_df.groupby("mes_periodo", as_index=False)
+        .agg(
+            refeicoes_produzidas=("refeicoes_produzidas", "sum"),
+            desperdicio_kg=("desperdicio_kg", "sum"),
+        )
+        .sort_values("mes_periodo")
+    )
+
+    monthly["mes_label"] = (
+        monthly["mes_periodo"]
+        .dt.to_timestamp()
+        .dt.strftime("%m/%Y")
     )
 
     monthly["taxa_desperdicio"] = (
@@ -112,20 +122,21 @@ def show_dashboard(school_id: int) -> None:
 
     fig = px.bar(
         monthly,
-        x="mes",
+        x="mes_label",
         y="desperdicio_kg",
         text=monthly["desperdicio_kg"].map(lambda value: f"{value:.1f} kg"),
         color="taxa_desperdicio",
+        custom_data=["taxa_desperdicio"],
         color_continuous_scale=["#dff6ef", "#0f9f6e", "#0b6fb8"],
         labels={
-            "mes": "Mês de acompanhamento",
+            "mes_label": "Mês/Ano",
             "desperdicio_kg": "Desperdício total (kg)",
             "taxa_desperdicio": "Taxa de desperdício (%)",
         },
     )
 
     fig.add_scatter(
-        x=monthly["mes"],
+        x=monthly["mes_label"],
         y=monthly["tendencia"],
         mode="lines+markers",
         name="Tendência de redução",
@@ -138,12 +149,23 @@ def show_dashboard(school_id: int) -> None:
             size=9,
             color="#073b4c",
         ),
+        hovertemplate=(
+            "<b>Mês/Ano:</b> %{x}<br>"
+            "<b>Tendência:</b> %{y:.1f} kg"
+            "<extra></extra>"
+        ),
     )
 
     fig.update_traces(
         textposition="outside",
         selector=dict(type="bar"),
         name="Desperdício mensal",
+        hovertemplate=(
+            "<b>Mês/Ano:</b> %{x}<br>"
+            "<b>Desperdício:</b> %{y:.1f} kg<br>"
+            "<b>Taxa de desperdício:</b> %{customdata[0]:.1f}%"
+            "<extra></extra>"
+        ),
     )
 
     fig.update_layout(
