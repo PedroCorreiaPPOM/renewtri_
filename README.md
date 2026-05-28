@@ -198,6 +198,10 @@ python -m streamlit run app.py
 http://localhost:8501
 ```
 
+### Ou acesse o site:
+
+https://renewtri.streamlit.app/
+
 ## Requirements
 
 O arquivo `requirements.txt` contém as bibliotecas necessárias para executar o projeto:
